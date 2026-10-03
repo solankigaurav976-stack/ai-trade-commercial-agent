@@ -1,0 +1,5 @@
+@odata.type,FlowTypeId,FlowTypeDescription
+#UktiApi.FlowType,1,EU Imports                                        
+#UktiApi.FlowType,2,EU Exports                                        
+#UktiApi.FlowType,3,Non-EU Imports                                    
+#UktiApi.FlowType,4,Non-EU Exports                                    

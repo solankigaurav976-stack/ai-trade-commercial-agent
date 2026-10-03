@@ -1,0 +1,355 @@
+import requests
+
+from trade_tools import (
+    get_top_trade_relationships,
+    get_top_trade_countries,
+    get_top_commodities,
+    get_high_value_trade,
+    get_trade_flow,
+    get_countries_above_value,
+    get_commodities_above_value,
+    get_commercial_opportunities,
+)
+
+OLLAMA_URL = "http://localhost:11434/api/chat"
+MODEL = "qwen3:1.7b"
+
+
+def ask_ollama(prompt):
+    response = requests.post(
+        OLLAMA_URL,
+        json={
+            "model": MODEL,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a trade intelligence assistant. "
+                        "Provide short qualitative business insights only. "
+                        "Do not reproduce database numbers. "
+                        "Do not invent currency, units, countries, commodities, "
+                        "or facts."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            "stream": False,
+            "think": False,
+        },
+        timeout=120,
+    )
+
+    response.raise_for_status()
+    return response.json()["message"]["content"]
+
+
+def extract_value_threshold(question):
+    import re
+
+    q = question.lower().replace(",", "")
+
+    match = re.search(r"(?:above|over|greater than|more than)\s+(\d+(?:\.\d+)?)\s*(million|billion|m|bn)?", q)
+
+    if not match:
+        return None
+
+    value = float(match.group(1))
+    unit = match.group(2)
+
+    if unit in ("billion", "bn"):
+        value *= 1_000_000_000
+    elif unit in ("million", "m"):
+        value *= 1_000_000
+
+    return value
+
+
+def classify_question(question):
+    q = question.lower()
+
+    if "country" in q or "countries" in q:
+        return "countries"
+
+    if "commodity" in q or "commodities" in q or "product" in q:
+        return "commodities"
+
+    if (
+        "trade flow" in q
+        or "trade flows" in q
+        or "eu export" in q
+        or "non-eu export" in q
+    ):
+        return "trade_flow"
+
+    if "high value" in q or "value per mass" in q:
+        return "high_value"
+
+    return "relationships"
+
+
+def get_database_data(question):
+    category = classify_question(question)
+    threshold = extract_value_threshold(question)
+
+    if threshold is not None and category == "countries":
+        return get_countries_above_value(threshold, 10)
+
+    if threshold is not None and category == "commodities":
+        return get_commodities_above_value(threshold, 10)
+
+    if category == "countries":
+        return get_top_trade_countries(10)
+
+    if category == "commodities":
+        return get_top_commodities(10)
+
+    if category == "trade_flow":
+        return get_trade_flow()
+
+    if category == "high_value":
+        return get_high_value_trade(10)
+
+    if "opportunit" in question.lower():
+        return get_commercial_opportunities(
+            minimum_value=1000000,
+            minimum_mass=1000,
+            limit=10
+        )
+
+    return get_top_trade_relationships(10)
+
+
+def format_country_results(data):
+    rows = []
+
+    for row in data:
+        rows.append({
+            "country": row[0],
+            "trade_records": row[1],
+            "commodities": row[2],
+            "total_value": float(row[3]),
+            "total_mass": float(row[4]),
+        })
+
+    rows.sort(key=lambda x: x["total_value"], reverse=True)
+
+    return rows
+
+
+def format_commodity_results(data):
+    rows = []
+
+    for row in data:
+        rows.append({
+            "commodity": row[0],
+            "trade_records": row[1],
+            "countries": row[2],
+            "total_value": float(row[3]),
+            "total_mass": float(row[4]),
+        })
+
+    rows.sort(key=lambda x: x["total_value"], reverse=True)
+
+    return rows
+
+
+def run_agent(question):
+    category = classify_question(question)
+    data = get_database_data(question)
+
+    # -------------------------
+    # COUNTRY INTELLIGENCE
+    # -------------------------
+    if category == "countries":
+        threshold = extract_value_threshold(question)
+
+        if threshold is not None:
+            print("\nDatabase filtered country results:\n")
+
+            for i, row in enumerate(data, 1):
+                country = row[0]
+                total_value = float(row[1])
+                total_mass = float(row[2] or 0)
+                trade_records = int(row[3])
+
+                print(
+                    f"{i}. {country} | "
+                    f"Total Value={total_value:,.2f} | "
+                    f"Total Mass={total_mass:,.2f} | "
+                    f"Trade Records={trade_records:,}"
+                )
+
+            print("\nBusiness Insight:")
+            print(
+                "These countries meet the requested minimum trade-value "
+                "threshold based on the database results."
+            )
+
+            return
+
+        rows = format_country_results(data)
+
+        print("\nDatabase-ranked results:\n")
+
+        for i, row in enumerate(rows, 1):
+            print(
+                f"{i}. {row['country']} | "
+                f"Total Value={row['total_value']:,.2f} | "
+                f"Trade Records={row['trade_records']:,} | "
+                f"Commodities={row['commodities']:,} | "
+                f"Total Mass={row['total_mass']:,.2f}"
+            )
+
+        return ask_ollama(
+            "Give one short qualitative business observation about "
+            "the country trade ranking. Do not repeat numbers."
+        )
+
+    # -------------------------
+    # COMMODITY INTELLIGENCE
+    # -------------------------
+    if category == "commodities":
+        rows = format_commodity_results(data)
+
+        print("\nDatabase-ranked commodity results:\n")
+
+        for i, row in enumerate(rows, 1):
+            print(
+                f"{i}. Commodity {row['commodity']} | "
+                f"Total Value={row['total_value']:,.2f} | "
+                f"Trade Records={row['trade_records']:,} | "
+                f"Countries={row['countries']:,} | "
+                f"Total Mass={row['total_mass']:,.2f}"
+            )
+
+        return ask_ollama(
+            "Give one short qualitative business observation about "
+            "the commodity trade ranking. Do not repeat numbers."
+        )
+
+    # -------------------------
+    # TRADE-FLOW INTELLIGENCE
+    # -------------------------
+    if category == "trade_flow":
+        rows = []
+
+        for row in data:
+            rows.append({
+                "flow": row[1],
+                "trade_records": row[2],
+                "countries": row[3],
+                "commodities": row[4],
+                "total_value": float(row[5]),
+                "total_mass": float(row[6]),
+            })
+
+        print("\nDatabase trade-flow results:\n")
+
+        for row in rows:
+            print(
+                f"{row['flow']} | "
+                f"Trade Records={row['trade_records']:,} | "
+                f"Countries={row['countries']:,} | "
+                f"Commodities={row['commodities']:,} | "
+                f"Total Value={row['total_value']:,.2f} | "
+                f"Total Net Mass={row['total_mass']:,.2f}"
+            )
+
+        print("\nBusiness Insight:")
+
+        insight = ask_ollama(
+            "Compare EU Exports and Non-EU Exports qualitatively. "
+            "Focus on the difference in geographic coverage and commodity "
+            "coverage. Do not repeat numbers and do not invent facts."
+        )
+
+        return insight
+
+    # -------------------------
+    # HIGH VALUE / VALUE PER MASS
+    # -------------------------
+    if category == "high_value":
+        print("\nDatabase high-value trade results:\n")
+
+        for i, row in enumerate(data, 1):
+            print(
+                f"{i}. {row[0]} | "
+                f"Country={row[1]} | "
+                f"Commodity={row[2]} | "
+                f"Total Value={float(row[3]):,.2f} | "
+                f"Total Mass={float(row[4]):,.2f} | "
+                f"Value Per Mass={float(row[5]):,.2f}"
+            )
+
+        print("\nBusiness Insight:")
+        print(
+            "Value per mass is a ratio and can be strongly affected by "
+            "very small recorded mass values. It should therefore be "
+            "considered alongside total value and total mass."
+        )
+
+        return ""
+
+    # -------------------------
+    # COMMERCIAL OPPORTUNITY
+    # -------------------------
+    if "opportunit" in question.lower():
+        print("\nDatabase commercial opportunity results:\n")
+
+        for i, row in enumerate(data, 1):
+            print(
+                f"{i}. {row[0]} | "
+                f"Country={row[1]} | "
+                f"Commodity={row[2]} | "
+                f"Total Value={float(row[3]):,.2f} | "
+                f"Total Mass={float(row[4]):,.2f} | "
+                f"Value Per Mass={float(row[5]):,.2f}"
+            )
+
+        print("\nBusiness Insight:")
+        print(
+            "These relationships meet the configured minimum trade-value "
+            "and trade-mass thresholds. The ranking is based on total trade value."
+        )
+
+        return ""
+
+    # -------------------------
+    # OTHER QUESTIONS
+    # -------------------------
+    return ask_ollama(
+        f"""
+User question:
+{question}
+
+Database results:
+{data}
+
+Give a short qualitative explanation.
+Do not modify or reproduce database numbers.
+"""
+    )
+
+
+if __name__ == "__main__":
+    print("AI Trade & Commercial Intelligence Agent")
+    print("Type 'exit' to quit.")
+
+    while True:
+        question = input("\nYou: ")
+
+        if question.lower() == "exit":
+            break
+
+        try:
+            answer = run_agent(question)
+
+            if answer:
+                print("\nAgent:")
+                print(answer)
+
+        except Exception as e:
+            print(f"\nError: {e}")
