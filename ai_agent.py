@@ -25,10 +25,16 @@ def ask_ollama(prompt):
                     "role": "system",
                     "content": (
                         "You are a trade intelligence assistant. "
-                        "Provide short qualitative business insights only. "
-                        "Do not reproduce database numbers. "
+                        "Provide short, evidence-grounded business insights only. "
+                        "Use only the context supplied in the prompt. "
+                        "Do not reproduce database numbers unless explicitly requested. "
                         "Do not invent currency, units, countries, commodities, "
-                        "or facts."
+                        "demand, pricing, market conditions, strategy, risk levels, "
+                        "or causes. "
+                        "Clearly distinguish observed database patterns from possible "
+                        "business implications. Use cautious language such as "
+                        "'may indicate' or 'could suggest' for interpretations. "
+                        "Never claim that a relationship is a proven opportunity."
                     ),
                 },
                 {
@@ -70,25 +76,52 @@ def extract_value_threshold(question):
 def classify_question(question):
     q = question.lower()
 
-    if "country" in q or "countries" in q:
-        return "countries"
-
-    if "commodity" in q or "commodities" in q or "product" in q:
-        return "commodities"
-
-    if (
-        "trade flow" in q
-        or "trade flows" in q
-        or "eu export" in q
-        or "non-eu export" in q
-    ):
-        return "trade_flow"
-
-    if "high value" in q or "value per mass" in q:
+    if any(term in q for term in [
+        "high value",
+        "highest value per mass",
+        "value per mass",
+        "high value trade"
+    ]):
         return "high_value"
 
-    return "relationships"
+    if any(term in q for term in [
+        "opportunity",
+        "opportunities",
+        "commercial opportunity",
+        "commercial opportunities"
+    ]):
+        return "opportunities"
 
+    if any(term in q for term in [
+        "trade flow",
+        "trade flows",
+        "eu export",
+        "eu exports",
+        "non-eu export",
+        "non-eu exports"
+    ]):
+        return "trade_flow"
+
+    if any(term in q for term in [
+        "country",
+        "countries",
+        "market",
+        "markets",
+        "destination",
+        "destinations"
+    ]):
+        return "countries"
+
+    if any(term in q for term in [
+        "commodity",
+        "commodities",
+        "product",
+        "products",
+        "goods"
+    ]):
+        return "commodities"
+
+    return "relationships"
 
 def get_database_data(question):
     category = classify_question(question)
@@ -112,7 +145,7 @@ def get_database_data(question):
     if category == "high_value":
         return get_high_value_trade(10)
 
-    if "opportunit" in question.lower():
+    if category == "opportunities":
         return get_commercial_opportunities(
             minimum_value=1000000,
             minimum_mass=1000,
@@ -203,9 +236,17 @@ def run_agent(question):
                 f"Total Mass={row['total_mass']:,.2f}"
             )
 
+        top_countries = ", ".join(
+            row["country"] for row in rows[:5]
+        )
+
         return ask_ollama(
+            f"Database analysis shows these leading trade markets: "
+            f"{top_countries}. "
             "Give one short qualitative business observation about "
-            "the country trade ranking. Do not repeat numbers."
+            "what concentration among these markets could mean for "
+            "trade strategy. Do not provide numbers, rankings, or "
+            "facts not contained in the supplied context."
         )
 
     # -------------------------
@@ -225,9 +266,46 @@ def run_agent(question):
                 f"Total Mass={row['total_mass']:,.2f}"
             )
 
+        top_commodities = ", ".join(
+            f"Commodity {row['commodity']}" for row in rows[:5]
+        )
+
         return ask_ollama(
+            f"Database analysis shows these leading traded commodities: "
+            f"{top_commodities}. "
             "Give one short qualitative business observation about "
-            "the commodity trade ranking. Do not repeat numbers."
+            "what concentration among these commodities could mean "
+            "for trade strategy. Clearly frame implications as "
+            "possible considerations, not proven facts. Do not provide "
+            "numbers or introduce facts outside the supplied context."
+        )
+
+    # -------------------------
+    # COMMERCIAL OPPORTUNITY INTELLIGENCE
+    # -------------------------
+    if category == "opportunities":
+        print("\nCommercial opportunity results:\n")
+
+        for i, row in enumerate(data, 1):
+            print(
+                f"{i}. {row[1]} | Commodity {row[2]} | "
+                f"Total Value={float(row[3]):,.2f} | "
+                f"Total Mass={float(row[4]):,.2f} | "
+                f"Value/Mass={float(row[5]):,.2f}"
+            )
+
+        opportunity_context = ", ".join(
+            f"{row[1]} / Commodity {row[2]}" for row in data[:5]
+        )
+
+        return ask_ollama(
+            f"Database analysis identified these leading commercial trade "
+            f"relationships: {opportunity_context}. "
+            "Give one short qualitative observation about what these "
+            "relationships could indicate for commercial analysis. "
+            "Frame implications as possible considerations rather than "
+            "proven opportunities. Do not provide numbers and do not "
+            "invent market, pricing, demand, or geopolitical facts."
         )
 
     # -------------------------
@@ -260,10 +338,23 @@ def run_agent(question):
 
         print("\nBusiness Insight:")
 
+        flow_context = "; ".join(
+            f"{row['flow']} covers {row['countries']} countries "
+            f"and {row['commodities']} commodities"
+            for row in rows
+        )
+
         insight = ask_ollama(
-            "Compare EU Exports and Non-EU Exports qualitatively. "
-            "Focus on the difference in geographic coverage and commodity "
-            "coverage. Do not repeat numbers and do not invent facts."
+            f"Database results show the following trade-flow coverage: "
+            f"{flow_context}. "
+            "Compare the flows qualitatively using only this supplied "
+            "context. Describe the observed differences in geographic "
+            "and commodity coverage. You may mention possible analytical "
+            "implications, but do not infer business strategy, market "
+            "priorities, diversification, risk management, market access, "
+            "competition, demand, pricing, or logistics unless explicitly "
+            "supported by the supplied context. Do not provide numbers "
+            "and do not invent facts."
         )
 
         return insight
@@ -285,37 +376,24 @@ def run_agent(question):
             )
 
         print("\nBusiness Insight:")
-        print(
-            "Value per mass is a ratio and can be strongly affected by "
-            "very small recorded mass values. It should therefore be "
-            "considered alongside total value and total mass."
+
+        high_value_context = "; ".join(
+            f"{row[0]} / {row[1]} / Commodity {row[2]}"
+            for row in data[:5]
         )
 
-        return ""
-
-    # -------------------------
-    # COMMERCIAL OPPORTUNITY
-    # -------------------------
-    if "opportunit" in question.lower():
-        print("\nDatabase commercial opportunity results:\n")
-
-        for i, row in enumerate(data, 1):
-            print(
-                f"{i}. {row[0]} | "
-                f"Country={row[1]} | "
-                f"Commodity={row[2]} | "
-                f"Total Value={float(row[3]):,.2f} | "
-                f"Total Mass={float(row[4]):,.2f} | "
-                f"Value Per Mass={float(row[5]):,.2f}"
-            )
-
-        print("\nBusiness Insight:")
-        print(
-            "These relationships meet the configured minimum trade-value "
-            "and trade-mass thresholds. The ranking is based on total trade value."
+        insight = ask_ollama(
+            f"Database results identified these high value-per-mass "
+            f"trade relationships: {high_value_context}. "
+            "Give one short qualitative observation about the "
+            "observed pattern. Explain that value per mass is a ratio "
+            "and should be interpreted alongside total trade value "
+            "and total mass. Do not treat a high ratio as proof of "
+            "commercial opportunity. Do not invent pricing, demand, "
+            "market conditions, or other facts not supplied."
         )
 
-        return ""
+        return insight
 
     # -------------------------
     # OTHER QUESTIONS
