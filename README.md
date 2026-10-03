@@ -30,6 +30,17 @@ Analytical Functions & Views
 ↓  
 Business Intelligence Results
 
+## 📸 Application Screenshots
+
+### Dashboard Overview
+![Dashboard Overview](screenshots/dashboard-overview.png)
+
+### Country Trade Analysis
+![Country Trade Analysis](screenshots/country-analysis.png)
+
+### Commercial Opportunity Analysis
+![Commercial Opportunity Analysis](screenshots/commercial-opportunities.png)
+
 ## 🛠️ Technology Stack
 
 - Python
