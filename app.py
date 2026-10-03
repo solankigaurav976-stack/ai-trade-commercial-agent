@@ -1,5 +1,11 @@
+import os
 import streamlit as st
 import pandas as pd
+
+for key, value in st.secrets.items():
+    if not isinstance(value, dict):
+        os.environ[key] = str(value)
+
 from ai_agent import get_database_data, classify_question, extract_value_threshold
 from live_data import get_live_exchange_rates
 
