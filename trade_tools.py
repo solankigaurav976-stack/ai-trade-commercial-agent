@@ -4,17 +4,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Use Supabase in cloud deployment; fall back to local PostgreSQL
-if os.getenv("SUPABASE_DB_HOST"):
-    DATABASE_URL = (
-        f"dbname={os.getenv('SUPABASE_DB_NAME', 'postgres')} "
-        f"user={os.getenv('SUPABASE_DB_USER')} "
-        f"password={os.getenv('SUPABASE_DB_PASSWORD')} "
-        f"host={os.getenv('SUPABASE_DB_HOST')} "
-        f"port={os.getenv('SUPABASE_DB_PORT', '5432')}"
-    )
-else:
-    DATABASE_URL = (
+def get_database_url():
+    if os.getenv("SUPABASE_DB_HOST"):
+        return (
+            f"dbname={os.getenv('SUPABASE_DB_NAME', 'postgres')} "
+            f"user={os.getenv('SUPABASE_DB_USER')} "
+            f"password={os.getenv('SUPABASE_DB_PASSWORD')} "
+            f"host={os.getenv('SUPABASE_DB_HOST')} "
+            f"port={os.getenv('SUPABASE_DB_PORT', '5432')}"
+        )
+
+    return (
         f"dbname={os.getenv('DB_NAME')} "
         f"user={os.getenv('DB_USER')} "
         f"password={os.getenv('DB_PASSWORD')} "
@@ -24,8 +24,7 @@ else:
 
 
 def get_connection():
-    return psycopg.connect(DATABASE_URL)
-
+    return psycopg.connect(get_database_url())
 
 def get_top_trade_relationships(limit=10):
     with get_connection() as conn:
