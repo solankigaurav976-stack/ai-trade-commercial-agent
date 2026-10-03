@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+trade_agent_backup.dump
