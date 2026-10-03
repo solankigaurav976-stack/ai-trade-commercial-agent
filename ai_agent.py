@@ -1,3 +1,4 @@
+import os
 import requests
 
 from trade_tools import (
@@ -14,6 +15,20 @@ from trade_tools import (
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen3:1.7b"
 
+SYSTEM_PROMPT = (
+    "You are a trade intelligence assistant. "
+    "Provide short, evidence-grounded business insights only. "
+    "Use only the context supplied in the prompt. "
+    "Do not reproduce database numbers unless explicitly requested. "
+    "Do not invent currency, units, countries, commodities, "
+    "demand, pricing, market conditions, strategy, risk levels, "
+    "or causes. "
+    "Clearly distinguish observed database patterns from possible "
+    "business implications. Use cautious language such as "
+    "'may indicate' or 'could suggest' for interpretations. "
+    "Never claim that a relationship is a proven opportunity."
+)
+
 
 def ask_ollama(prompt):
     response = requests.post(
@@ -21,35 +36,49 @@ def ask_ollama(prompt):
         json={
             "model": MODEL,
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a trade intelligence assistant. "
-                        "Provide short, evidence-grounded business insights only. "
-                        "Use only the context supplied in the prompt. "
-                        "Do not reproduce database numbers unless explicitly requested. "
-                        "Do not invent currency, units, countries, commodities, "
-                        "demand, pricing, market conditions, strategy, risk levels, "
-                        "or causes. "
-                        "Clearly distinguish observed database patterns from possible "
-                        "business implications. Use cautious language such as "
-                        "'may indicate' or 'could suggest' for interpretations. "
-                        "Never claim that a relationship is a proven opportunity."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
             ],
             "stream": False,
             "think": False,
         },
         timeout=120,
     )
-
     response.raise_for_status()
     return response.json()["message"]["content"]
+
+
+def ask_gemini(prompt):
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
+
+    response = requests.post(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        params={"key": api_key},
+        json={
+            "systemInstruction": {
+                "parts": [{"text": SYSTEM_PROMPT}]
+            },
+            "contents": [
+                {"parts": [{"text": prompt}]}
+            ],
+        },
+        timeout=120,
+    )
+
+    response.raise_for_status()
+    return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def ask_llm(prompt):
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+
+    if provider == "gemini":
+        return ask_gemini(prompt)
+
+    return ask_ollama(prompt)
 
 
 def extract_value_threshold(question):
@@ -151,7 +180,7 @@ def get_database_data(question):
             minimum_mass=1000,
             limit=10
         )
-
+    return ask_ollama(prompt)
     return get_top_trade_relationships(10)
 
 
@@ -240,7 +269,7 @@ def run_agent(question):
             row["country"] for row in rows[:5]
         )
 
-        return ask_ollama(
+        return ask_llm(
             f"Database analysis shows these leading trade markets: "
             f"{top_countries}. "
             "Give one short qualitative business observation about "
@@ -270,7 +299,7 @@ def run_agent(question):
             f"Commodity {row['commodity']}" for row in rows[:5]
         )
 
-        return ask_ollama(
+        return ask_llm(
             f"Database analysis shows these leading traded commodities: "
             f"{top_commodities}. "
             "Give one short qualitative business observation about "
@@ -298,7 +327,7 @@ def run_agent(question):
             f"{row[1]} / Commodity {row[2]}" for row in data[:5]
         )
 
-        return ask_ollama(
+        return ask_llm(
             f"Database analysis identified these leading commercial trade "
             f"relationships: {opportunity_context}. "
             "Give one short qualitative observation about what these "
@@ -344,7 +373,7 @@ def run_agent(question):
             for row in rows
         )
 
-        insight = ask_ollama(
+        insight = ask_llm(
             f"Database results show the following trade-flow coverage: "
             f"{flow_context}. "
             "Compare the flows qualitatively using only this supplied "
@@ -382,7 +411,7 @@ def run_agent(question):
             for row in data[:5]
         )
 
-        insight = ask_ollama(
+        insight = ask_llm(
             f"Database results identified these high value-per-mass "
             f"trade relationships: {high_value_context}. "
             "Give one short qualitative observation about the "
@@ -398,7 +427,7 @@ def run_agent(question):
     # -------------------------
     # OTHER QUESTIONS
     # -------------------------
-    return ask_ollama(
+    return ask_llm(
         f"""
 User question:
 {question}
